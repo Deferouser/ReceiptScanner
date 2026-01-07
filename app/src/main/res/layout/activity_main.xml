@@ -23,7 +23,8 @@
             android:layout_height="wrap_content"
             android:text="Raw OCR Output Here"
             android:padding="16dp"
-            android:textSize="14sp"/>
+            android:textSize="14sp"
+            android:textIsSelectable="true"/>
     </ScrollView>
 
     <!-- Parsed/Formatted Receipt Summary Scrollable -->
@@ -42,7 +43,8 @@
             android:layout_height="wrap_content"
             android:text="Receipt Details Here"
             android:padding="16dp"
-            android:textSize="16sp"/>
+            android:textSize="16sp"
+            android:textIsSelectable="true"/>
     </ScrollView>
 
     <!-- Buttons stay at bottom -->

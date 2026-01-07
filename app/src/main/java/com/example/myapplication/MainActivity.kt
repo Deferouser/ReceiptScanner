@@ -102,38 +102,54 @@ class MainActivity : AppCompatActivity() {
     )
 
     private fun parseReceipt(rawText: String): List<ReceiptItem> {
-        val lines = rawText.split("\n")
+        val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
         val items = mutableListOf<ReceiptItem>()
-        val totals = mutableListOf<Double>()
+        val candidatePrices = mutableListOf<Double>()
 
         val itemRegex = Regex("""^(\d+)\s+(.+)""")
-        val priceRegex = Regex("""^\d+(\.\d+)?$""")
+        val priceRegex = Regex("""^\$?\d{1,3}(,\d{3})*(\.\d{1,2})?\s*[A-Z]?$""")
+        val weightRegex = Regex("""([\d.]+)\s*kg\s*@\s*([\d.,]+)\/kg""")
 
-        for (line in lines.map { it.trim() }.filter { it.isNotEmpty() }) {
-            val itemMatch = itemRegex.find(line)
-            if (itemMatch != null) {
-                val qty = itemMatch.groupValues[1].toInt()
-                val desc = itemMatch.groupValues[2]
-                items.add(ReceiptItem(qty, desc))
+        for (line in lines) {
+            // Weighted item
+            val weightMatch = weightRegex.find(line)
+            if (weightMatch != null) {
+                val weight = weightMatch.groupValues[1].toDouble()
+                val unitPrice = weightMatch.groupValues[2].replace(",", "").toDouble()
+                val totalPrice = weight * unitPrice
+                items.add(ReceiptItem(qty = 1, description = "Weighted Item", price = totalPrice))
                 continue
             }
 
+            // Item line
+            val itemMatch = itemRegex.find(line)
+            if (itemMatch != null) {
+                val number = itemMatch.groupValues[1].toInt()
+                val desc = itemMatch.groupValues[2]
+
+                if (number < 1000) {
+                    // Treat as quantity
+                    items.add(ReceiptItem(qty = number, description = desc))
+                } else {
+                    // Treat as product code
+                    items.add(ReceiptItem(qty = 1, description = desc))
+                }
+                continue
+            }
+
+            // Price line
             val priceMatch = priceRegex.find(line)
             if (priceMatch != null) {
-                totals.add(line.toDouble())
+                val clean = line.replace("[^\\d.]".toRegex(), "").replace(",", "")
+                candidatePrices.add(clean.toDouble())
             }
         }
 
-        // Map first N totals to first N items
+        // Map prices to items (pharmacy style)
         for (i in items.indices) {
-            if (i < totals.size) {
-                items[i] = items[i].copy(price = totals[i])
+            if (i < candidatePrices.size && items[i].price == null) {
+                items[i] = items[i].copy(price = candidatePrices[i])
             }
-        }
-
-        // Log results
-        items.forEach {
-            Log.d("ReceiptParser", "Item: ${it.description}, Qty: ${it.qty}, Price: ${it.price}")
         }
 
         return items

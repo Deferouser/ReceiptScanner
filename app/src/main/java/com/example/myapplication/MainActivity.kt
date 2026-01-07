@@ -82,16 +82,16 @@ class MainActivity : AppCompatActivity() {
 
         recognizer.process(image)
             .addOnSuccessListener { visionText ->
+                // Show raw OCR text
+                binding.rawText.text = visionText.text
+
+                // Parse and show formatted summary
                 val parsedItems = parseReceipt(visionText.text)
-
-                // Build a formatted string
-                val displayText = buildReceiptSummary(parsedItems)
-
-                // Show in TextView
-                binding.text.text = displayText
+                binding.text.text = buildReceiptSummary(parsedItems)
             }
             .addOnFailureListener { e ->
-                binding.text.text = "Error: ${e.message}"
+                binding.rawText.text = "Error: ${e.message}"
+                binding.text.text = ""
             }
     }
 
@@ -167,6 +167,10 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == RESULT_OK) {
             val rawText = result.data?.getStringExtra("OCR_TEXT")
             rawText?.let {
+                // Show raw OCR text
+                binding.rawText.text = it
+
+                // Parse and show formatted summary
                 val parsedItems = parseReceipt(it)
                 binding.text.text = buildReceiptSummary(parsedItems)
             }

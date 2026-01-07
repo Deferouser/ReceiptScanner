@@ -1,6 +1,7 @@
 package com.example.myapplication
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
@@ -39,52 +40,20 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
-
-        if (allPermissionsGranted()) {
-            startCamera()
-        } else {
-            ActivityCompat.requestPermissions(this,
-                arrayOf(Manifest.permission.CAMERA), 123)
+        binding.captureButton.setOnClickListener {
+            val intent = Intent(this, CameraActivity::class.java)
+            cameraLauncher.launch(intent)
         }
 
-        binding.captureButton.setOnClickListener {
-            takePhoto()
+
+        binding.uploadButton.setOnClickListener {
+            pickImageLauncher.launch("image/*")
         }
     }
 
     private fun allPermissionsGranted() =
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
-    private fun startCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(binding.previewView.surfaceProvider)
-            }
-
-            // assign to the class property, not a local variable
-            imageCapture = ImageCapture.Builder().build()
-
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this,
-                    cameraSelector,
-                    preview,
-                    imageCapture
-                )
-            } catch (exc: Exception) {
-                Log.e("CameraX", "Use case binding failed", exc)
-            }
-
-        }, ContextCompat.getMainExecutor(this))
-    }
 
     private fun takePhoto() {
         val imageCapture = imageCapture ?: return
@@ -179,4 +148,30 @@ class MainActivity : AppCompatActivity() {
         }
         return builder.toString().trim()
     }
+
+    private val pickImageLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        uri?.let {
+            val photoFile = File(cacheDir, "uploaded_receipt.jpg")
+            contentResolver.openInputStream(it)?.use { input ->
+                photoFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            processReceiptImage(photoFile)
+        }
+    }
+
+    private val cameraLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val rawText = result.data?.getStringExtra("OCR_TEXT")
+            rawText?.let {
+                val parsedItems = parseReceipt(it)
+                binding.text.text = buildReceiptSummary(parsedItems)
+            }
+        }
+    }
+
+
 }

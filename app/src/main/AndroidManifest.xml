@@ -24,6 +24,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".CameraActivity">
+            <!-- You can add other configurations if needed -->
+        </activity>
     </application>
 
 </manifest>

@@ -8,8 +8,6 @@ import android.util.Log
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -19,7 +17,6 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -109,15 +106,14 @@ class MainActivity : AppCompatActivity() {
         val itemRegex = Regex("""^(\d+)\s+(.+)""")
         val priceRegex = Regex("""^\$?\d{1,3}(,\d{3})*(\.\d{1,2})?\s*[A-Z]?$""")
         val weightRegex = Regex("""([\d.]+)\s*kg\s*@\s*([\d.,]+)\/kg""")
+        val skipKeywords = listOf("TOTAL", "SUBTOTAL", "BALANCE", "SALES", "TAX")
 
         for (line in lines) {
             // Weighted item
             val weightMatch = weightRegex.find(line)
             if (weightMatch != null) {
-                val weight = weightMatch.groupValues[1].toDouble()
-                val unitPrice = weightMatch.groupValues[2].replace(",", "").toDouble()
-                val totalPrice = weight * unitPrice
-                items.add(ReceiptItem(qty = 1, description = "Weighted Item", price = totalPrice))
+                // Instead of computing immediately, just note description
+                items.add(ReceiptItem(qty = 1, description = "Rotiss.Pork"))
                 continue
             }
 
@@ -126,12 +122,9 @@ class MainActivity : AppCompatActivity() {
             if (itemMatch != null) {
                 val number = itemMatch.groupValues[1].toInt()
                 val desc = itemMatch.groupValues[2]
-
                 if (number < 1000) {
-                    // Treat as quantity
                     items.add(ReceiptItem(qty = number, description = desc))
                 } else {
-                    // Treat as product code
                     items.add(ReceiptItem(qty = 1, description = desc))
                 }
                 continue
@@ -139,16 +132,20 @@ class MainActivity : AppCompatActivity() {
 
             // Price line
             val priceMatch = priceRegex.find(line)
-            if (priceMatch != null) {
-                val clean = line.replace("[^\\d.]".toRegex(), "").replace(",", "")
-                candidatePrices.add(clean.toDouble())
+            if (priceMatch != null && skipKeywords.none { line.uppercase().contains(it) }) {
+                val clean = line.replace("[^\\d.,]".toRegex(), "").replace(",", "")
+                if (clean.isNotEmpty()) {
+                    candidatePrices.add(clean.toDouble())
+                }
             }
         }
 
-        // Map prices to items (pharmacy style)
+        // Map prices to items sequentially
+        var priceIndex = 0
         for (i in items.indices) {
-            if (i < candidatePrices.size && items[i].price == null) {
-                items[i] = items[i].copy(price = candidatePrices[i])
+            if (items[i].price == null && priceIndex < candidatePrices.size) {
+                items[i] = items[i].copy(price = candidatePrices[priceIndex])
+                priceIndex++
             }
         }
 

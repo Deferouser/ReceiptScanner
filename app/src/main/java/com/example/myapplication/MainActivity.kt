@@ -16,11 +16,9 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
-import java.util.concurrent.ExecutorService
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
-    private lateinit var cameraExecutor: ExecutorService
     private var imageCapture: ImageCapture? = null
 
 

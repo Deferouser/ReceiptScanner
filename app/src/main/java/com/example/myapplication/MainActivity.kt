@@ -50,11 +50,7 @@ class MainActivity : AppCompatActivity() {
             val rawText = binding.rawText.text.toString()
             val summary = parseReceipt(rawText)
             if (summary.storeNameMissing) {
-                Toast.makeText(
-                    this,
-                    "Store name not detected. Please retake or upload another photo.",
-                    Toast.LENGTH_LONG
-                ).show()
+                binding.text.text = "Store name not detected. Please retake or upload another photo."
             } else {
                 binding.text.text = buildReceiptSummary(summary)
             }

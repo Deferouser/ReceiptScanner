@@ -68,8 +68,13 @@ class CameraActivity : AppCompatActivity() {
 
                     recognizer.process(image)
                         .addOnSuccessListener { visionText ->
+                            val capturedText = captureLines(visionText)   // try lines
+                            // val capturedText = captureBlocks(visionText) // try blocks
+                            //val capturedText = captureElements(visionText) // try words
+                            //val capturedText = captureWithBounds(visionText) // debug layout
+
                             val intent = Intent().apply {
-                                putExtra("OCR_TEXT", visionText.text)
+                                putExtra("OCR_TEXT", capturedText)
                             }
                             setResult(RESULT_OK, intent)
                             finish()
@@ -81,5 +86,54 @@ class CameraActivity : AppCompatActivity() {
                 }
             }
         )
+    }
+
+    // Capture full text (default)
+    fun captureFullText(visionText: com.google.mlkit.vision.text.Text): String {
+        return visionText.text
+    }
+
+    // Capture by blocks
+    fun captureBlocks(visionText: com.google.mlkit.vision.text.Text): String {
+        return visionText.textBlocks.joinToString("\n") { block ->
+            "BLOCK: ${block.text}"
+        }
+    }
+
+    // Capture by lines
+    // Capture by lines, sorted top-to-bottom (ignore left/right)
+    fun captureLines(visionText: com.google.mlkit.vision.text.Text): String {
+        val lines = visionText.textBlocks.flatMap { it.lines }
+
+        // Sort by vertical position (top of bounding box)
+        val sortedLines = lines.sortedBy { it.boundingBox?.top ?: 0 }
+
+        return sortedLines.joinToString("\n") { line ->
+            line.text
+        }
+    }
+
+    // Capture by words/elements
+    fun captureElements(visionText: com.google.mlkit.vision.text.Text): String {
+        return visionText.textBlocks.flatMap { it.lines }
+            .flatMap { it.elements }
+            .joinToString(" ") { element ->
+                element.text
+            }
+    }
+
+    // Capture with bounding boxes (for debugging layout)
+    fun captureWithBounds(visionText: com.google.mlkit.vision.text.Text): String {
+        val sb = StringBuilder()
+        for (block in visionText.textBlocks) {
+            sb.append("BLOCK: ${block.text} at ${block.boundingBox}\n")
+            for (line in block.lines) {
+                sb.append("  LINE: ${line.text} at ${line.boundingBox}\n")
+                for (element in line.elements) {
+                    sb.append("    WORD: ${element.text} at ${element.boundingBox}\n")
+                }
+            }
+        }
+        return sb.toString()
     }
 }

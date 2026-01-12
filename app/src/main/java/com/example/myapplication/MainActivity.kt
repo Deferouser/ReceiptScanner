@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
@@ -44,30 +45,54 @@ class MainActivity : AppCompatActivity() {
         binding.uploadButton.setOnClickListener {
             pickImageLauncher.launch("image/*")
         }
+
+        binding.sendButton.setOnClickListener {
+            val rawText = binding.rawText.text.toString()
+            val summary = parseReceipt(rawText)
+            if (summary.storeNameMissing) {
+                Toast.makeText(
+                    this,
+                    "Store name not detected. Please retake or upload another photo.",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                binding.text.text = buildReceiptSummary(summary)
+            }
+
+            // Convert to DTO
+            val dto = summary.toDto()
+
+            // For now, just log the full summary DTO
+            Log.d("ReceiptDTO", "Sending: $dto")
+
+            // TODO: API call
+        }
     }
 
-    private fun allPermissionsGranted() =
-        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    data class ReceiptItemDto(
+        val quantity: Int,
+        val description: String,
+        val price: Double?
+    )
 
+    data class ReceiptSummaryDto(
+        val storeName: String?,
+        val address: String?,
+        val items: List<ReceiptItemDto>
+    )
+    fun ReceiptItem.toDto(): ReceiptItemDto {
+        return ReceiptItemDto(
+            quantity = this.qty,
+            description = this.description,
+            price = this.price
+        )
+    }
 
-    private fun takePhoto() {
-        val imageCapture = imageCapture ?: return
-
-        val photoFile = File(externalMediaDirs.first(), "receipt.jpg")
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-
-        imageCapture.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onError(exc: ImageCaptureException) {
-                    Log.e("CameraX", "Photo capture failed: ${exc.message}", exc)
-                }
-
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    processReceiptImage(photoFile)
-                }
-            }
+    fun ReceiptSummary.toDto(): ReceiptSummaryDto {
+        return ReceiptSummaryDto(
+            storeName = this.storeName,
+            address = this.address,
+            items = this.items.map { it.toDto() }
         )
     }
 
@@ -96,22 +121,50 @@ class MainActivity : AppCompatActivity() {
         val price: Double? = null
     )
 
-    private fun parseReceipt(rawText: String): List<ReceiptItem> {
+    data class ReceiptSummary(
+        val storeName: String?,
+        val address: String?,
+        val items: List<ReceiptItem>,
+        val storeNameMissing: Boolean = false
+    )
+
+    private fun parseReceipt(rawText: String): ReceiptSummary {
         val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
         val items = mutableListOf<ReceiptItem>()
         val candidatePrices = mutableListOf<Double>()
 
+        var storeName: String? = null
+        val addressLines = mutableListOf<String>()
+
         val itemRegex = Regex("""^(\d+)\s+(.+)""")
         val priceRegex = Regex("""^\$?\d{1,3}(,\d{3})*(\.\d{1,2})?\s*[A-Z]?$""")
         val weightRegex = Regex("""([\d.]+)\s*kg\s*@\s*([\d.,]+)\/kg""")
-        val skipKeywords = listOf("TOTAL", "SUBTOTAL", "BALANCE", "SALES", "TAX")
+        val skipKeywords = listOf("TOTAL","SUBTOTAL","BALANCE","SALES","TAX","USER","DATE","RECEIPT")
+
+        var capturingAddress = false
 
         for (line in lines) {
+            // Capture store name (first line before keywords)
+            if (storeName == null && skipKeywords.none { line.uppercase().contains(it) }) {
+                storeName = line
+                capturingAddress = true
+                continue
+            }
+
+            // Capture address lines until keywords or items
+            if (capturingAddress) {
+                if (skipKeywords.any { line.uppercase().contains(it) } || itemRegex.find(line) != null) {
+                    capturingAddress = false
+                } else {
+                    addressLines.add(line)
+                    continue
+                }
+            }
+
             // Weighted item
             val weightMatch = weightRegex.find(line)
             if (weightMatch != null) {
-                // Instead of computing immediately, just note description
-                items.add(ReceiptItem(qty = 1, description = "Rotiss.Pork"))
+                items.add(ReceiptItem(qty = 1, description = "Weighted Item"))
                 continue
             }
 
@@ -147,19 +200,41 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        return items
+        // Fallback: try to guess store name later
+        if (storeName == null || storeName.contains(Regex("""\d""")) ||
+            storeName.contains("ROAD", true) || storeName.contains("SHOP", true)) {
+            val candidate = lines.firstOrNull {
+                it.uppercase().contains("PHARMACY") ||
+                        it.uppercase().contains("SUPERMARKET") ||
+                        it.uppercase().contains("STORE") ||
+                        it.uppercase().contains("CENTRE") ||
+                        it.uppercase().contains("MART") ||
+                        it.uppercase().contains("MARKET")
+            }
+            if (candidate != null) {
+                storeName = candidate
+            }
+        }
+
+        // ✅ Validation: mark missing if store name doesn’t contain expected keywords
+        val validKeywords = listOf("MARKET", "SUPER", "STORE", "PHARMACY", "CENTRE", "SHOP", "MART", "GROCERY")
+        val storeNameMissing = storeName == null ||
+                validKeywords.none { keyword -> storeName!!.uppercase().contains(keyword) }
+
+        return ReceiptSummary(storeName, addressLines.joinToString(", "), items, storeNameMissing)
     }
 
-    private fun buildReceiptSummary(items: List<ReceiptItem>): String {
+    private fun buildReceiptSummary(summary: ReceiptSummary): String {
         val builder = StringBuilder()
+        builder.append("Store: ${summary.storeName ?: "Unknown"}\n")
+        builder.append("Address: ${summary.address ?: "Unknown"}\n\n")
         builder.append("Receipt Summary:\n\n")
-        for (item in items) {
+        for (item in summary.items) {
             builder.append("• ${item.description}\n")
             builder.append("   Qty: ${item.qty}, Price: ${item.price}\n\n")
         }
         return builder.toString().trim()
     }
-
     private val pickImageLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri: android.net.Uri? ->

@@ -88,52 +88,41 @@ class CameraActivity : AppCompatActivity() {
         )
     }
 
-    // Capture full text (default)
-    fun captureFullText(visionText: com.google.mlkit.vision.text.Text): String {
-        return visionText.text
-    }
-
-    // Capture by blocks
-    fun captureBlocks(visionText: com.google.mlkit.vision.text.Text): String {
-        return visionText.textBlocks.joinToString("\n") { block ->
-            "BLOCK: ${block.text}"
-        }
-    }
-
     // Capture by lines
     // Capture by lines, sorted top-to-bottom (ignore left/right)
+    // Capture by lines, sorted top-to-bottom (ignore left/right), filter out phone numbers
+    // Capture by lines, sorted top-to-bottom, filter out phone numbers and single letters
+    // Capture by lines, sorted top-to-bottom, filter out phone numbers, single letters, and unwanted keywords
     fun captureLines(visionText: com.google.mlkit.vision.text.Text): String {
         val lines = visionText.textBlocks.flatMap { it.lines }
 
         // Sort by vertical position (top of bounding box)
         val sortedLines = lines.sortedBy { it.boundingBox?.top ?: 0 }
 
-        return sortedLines.joinToString("\n") { line ->
+        // Regex for phone numbers
+        val phoneRegex = Regex("""(\+?\d[\d\s\-\(\)]{6,15}\d)""")
+
+        // Keywords to filter out (lowercase for matching)
+        val unwantedKeywords = listOf(
+            "subtotal", "total", "tax", "+ tax",
+            "debit card", "credit card", "change"
+        )
+
+        // Filter out lines
+        val filteredLines = sortedLines.filter { line ->
+            val text = line.text.trim()
+            val lower = text.lowercase()
+
+            val isPhone = phoneRegex.containsMatchIn(text)
+            val isSingleLetter = text.length == 1 && text[0].isLetter()
+            val hasUnwantedKeyword = unwantedKeywords.any { lower.contains(it) }
+
+            !(isPhone || isSingleLetter || hasUnwantedKeyword)
+        }
+
+        return filteredLines.joinToString("\n") { line ->
             line.text
         }
     }
 
-    // Capture by words/elements
-    fun captureElements(visionText: com.google.mlkit.vision.text.Text): String {
-        return visionText.textBlocks.flatMap { it.lines }
-            .flatMap { it.elements }
-            .joinToString(" ") { element ->
-                element.text
-            }
-    }
-
-    // Capture with bounding boxes (for debugging layout)
-    fun captureWithBounds(visionText: com.google.mlkit.vision.text.Text): String {
-        val sb = StringBuilder()
-        for (block in visionText.textBlocks) {
-            sb.append("BLOCK: ${block.text} at ${block.boundingBox}\n")
-            for (line in block.lines) {
-                sb.append("  LINE: ${line.text} at ${line.boundingBox}\n")
-                for (element in line.elements) {
-                    sb.append("    WORD: ${element.text} at ${element.boundingBox}\n")
-                }
-            }
-        }
-        return sb.toString()
-    }
 }

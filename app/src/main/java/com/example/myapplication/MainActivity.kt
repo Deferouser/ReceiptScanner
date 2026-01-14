@@ -22,9 +22,6 @@ import java.io.File
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
-    private var imageCapture: ImageCapture? = null
-
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,8 +111,18 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-
     private fun parseReceipt(rawText: String): ReceiptSummary {
+        val upper = rawText.uppercase()
+
+        return when {
+            upper.contains("ARDENNE") -> parseArdenneReceipt(rawText)
+            upper.contains("LOSHUSAN") -> parseLoshusanReceipt(rawText)
+            else -> parseGenericReceipt(rawText)
+        }
+    }
+
+
+    private fun parseArdenneReceipt(rawText: String): ReceiptSummary {
         val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
         val items = mutableListOf<ReceiptItem>()
         val candidatePrices = mutableListOf<Double>()
@@ -209,6 +216,59 @@ class MainActivity : AppCompatActivity() {
                 validKeywords.none { keyword -> storeName!!.uppercase().contains(keyword) }
 
         return ReceiptSummary(storeName, addressLines.joinToString(", "), items, storeNameMissing)
+    }
+
+    private fun parseLoshusanReceipt(rawText: String): ReceiptSummary {
+        val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+
+        val items = mutableListOf<ReceiptItem>()
+        val storeName: String? = "Loshusan Supermarket"
+        val location: String? = "New Kingston"
+
+        val priceRegex = Regex("""\$?\d{2,6}(\.\d{1,2})?""")
+        val skipKeywords = listOf(
+            "TOTAL","SUBTOTAL","BALANCE","SALES","TAX","USER","DATE","RECEIPT",
+            "ITEM COUNT","CARD","GCT","SUBTOTAL","STANDARD","NCB","PRODUCE","GENERAL",
+            "WORKING DAYS","DONATE","BREAST CANCER","THANK YOU"
+        )
+
+        for (i in lines.indices) {
+            val line = lines[i]
+
+            val isPriceLine = priceRegex.matches(line.replace(" ", ""))
+            val isSkip = skipKeywords.any { line.uppercase().contains(it) }
+            val isShortNumber = line.matches(Regex("""^\d+$"""))
+
+            if (!isPriceLine && !isSkip && !isShortNumber) {
+                val priceLine = lines.take(i).lastOrNull { priceRegex.containsMatchIn(it) }
+                val price = priceLine?.let {
+                    priceRegex.find(it)?.value?.replace("$", "")?.toDoubleOrNull()
+                }
+
+                if (price != null) {
+                    items.add(ReceiptItem(qty = 1, description = line, price = price))
+                }
+            }
+        }
+
+        return ReceiptSummary(storeName, location, items, storeName == null)
+    }
+    private fun parseGenericReceipt(rawText: String): ReceiptSummary {
+        val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        val storeName = lines.firstOrNull()
+        val items = mutableListOf<ReceiptItem>()
+
+        val itemRegex = Regex("""^(\d+)\s+(.+)""")
+        for (line in lines) {
+            val match = itemRegex.find(line)
+            if (match != null) {
+                val qty = match.groupValues[1].toInt()
+                val desc = match.groupValues[2]
+                items.add(ReceiptItem(qty = qty, description = desc))
+            }
+        }
+
+        return ReceiptSummary(storeName, null, items, storeName == null)
     }
 
     private fun buildReceiptSummary(summary: ReceiptSummary): String {

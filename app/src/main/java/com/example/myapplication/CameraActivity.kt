@@ -105,7 +105,7 @@ class CameraActivity : AppCompatActivity() {
         // Keywords to filter out (lowercase for matching)
         val unwantedKeywords = listOf(
             "subtotal", "total", "tax", "+ tax",
-            "debit card", "credit card", "change"
+            "debit card", "credit card", "change", "items"
         )
 
         // Filter out lines

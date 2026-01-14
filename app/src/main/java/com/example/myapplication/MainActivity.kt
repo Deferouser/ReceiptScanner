@@ -12,10 +12,12 @@ import androidx.camera.core.*
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.myapplication.databinding.ActivityMainBinding
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.launch
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
@@ -49,33 +51,34 @@ class MainActivity : AppCompatActivity() {
         binding.sendButton.setOnClickListener {
             val rawText = binding.rawText.text.toString()
             val summary = parseReceipt(rawText)
+
             if (summary.storeNameMissing) {
                 binding.text.text = "Store name not detected. Please retake or upload another photo."
             } else {
                 binding.text.text = buildReceiptSummary(summary)
             }
 
-            // Convert to DTO
             val dto = summary.toDto()
-
-            // For now, just log the full summary DTO
             Log.d("ReceiptDTO", "Sending: $dto")
 
-            // TODO: API call
+            // API call
+            lifecycleScope.launch {
+                try {
+                    val response = RetrofitClient.instance.sendReceipt(dto)
+                    if (response.isSuccessful) {
+                        val body = response.body()
+                        Log.d("ReceiptDTO", "Server response: $body")
+                        Toast.makeText(this@MainActivity, "Sent successfully!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Log.e("ReceiptDTO", "Error: ${response.code()} ${response.message()}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("ReceiptDTO", "Exception: ${e.message}")
+                }
+            }
         }
     }
 
-    data class ReceiptItemDto(
-        val quantity: Int,
-        val description: String,
-        val price: Double?
-    )
-
-    data class ReceiptSummaryDto(
-        val storeName: String?,
-        val address: String?,
-        val items: List<ReceiptItemDto>
-    )
     fun ReceiptItem.toDto(): ReceiptItemDto {
         return ReceiptItemDto(
             quantity = this.qty,
@@ -111,18 +114,6 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    data class ReceiptItem(
-        val qty: Int,
-        val description: String,
-        val price: Double? = null
-    )
-
-    data class ReceiptSummary(
-        val storeName: String?,
-        val address: String?,
-        val items: List<ReceiptItem>,
-        val storeNameMissing: Boolean = false
-    )
 
     private fun parseReceipt(rawText: String): ReceiptSummary {
         val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }

@@ -29,3 +29,9 @@ data class ApiResponse(
     val status: String,
     val received: ReceiptSummaryDto
 )
+
+data class ReceiptResponseDto(
+    val store_exists: Boolean,
+    val items_exist: List<Boolean>,
+    val status: String
+)

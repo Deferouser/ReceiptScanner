@@ -49,22 +49,27 @@ class MainActivity : AppCompatActivity() {
             val rawText = binding.rawText.text.toString()
             val summary = parseReceipt(rawText)
 
-            if (summary.storeNameMissing) {
-                binding.text.text = "Store name not detected. Please retake or upload another photo."
-            } else {
-                binding.text.text = buildReceiptSummary(summary)
-            }
-
             val dto = summary.toDto()
             Log.d("ReceiptDTO", "Sending: $dto")
 
-            // API call
             lifecycleScope.launch {
                 try {
                     val response = RetrofitClient.instance.sendReceipt(dto)
                     if (response.isSuccessful) {
                         val body = response.body()
-                        Log.d("ReceiptDTO", "Server response: $body")
+                        if (body != null) {
+                            // ✅ Collect and display response
+                            val storeStatus = if (body.store_exists) "Store found" else "Store not found"
+                            val itemStatuses = body.items_exist.mapIndexed { index, exists ->
+                                "Item ${index + 1}: ${if (exists) "Found" else "Not found"}"
+                            }.joinToString("\n")
+
+                            binding.text.text = """
+                        $storeStatus
+                        $itemStatuses
+                        Status: ${body.status}
+                    """.trimIndent()
+                        }
                         Toast.makeText(this@MainActivity, "Sent successfully!", Toast.LENGTH_SHORT).show()
                     } else {
                         Log.e("ReceiptDTO", "Error: ${response.code()} ${response.message()}")

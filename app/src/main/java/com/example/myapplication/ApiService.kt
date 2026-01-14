@@ -6,5 +6,5 @@ import retrofit2.http.POST
 
 interface ReceiptApiService {
     @POST("receipts")
-    suspend fun sendReceipt(@Body receipt: ReceiptSummaryDto): Response<ApiResponse>
+    suspend fun sendReceipt(@Body receipt: ReceiptSummaryDto): Response<ReceiptResponseDto>
 }

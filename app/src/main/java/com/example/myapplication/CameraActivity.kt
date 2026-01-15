@@ -49,6 +49,7 @@ class CameraActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    //Does not accurately capture receipts lines if too close to the camera
     private fun takePhoto() {
         val photoFile = File(externalMediaDirs.first(), "receipt.jpg")
         val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
@@ -68,14 +69,20 @@ class CameraActivity : AppCompatActivity() {
 
                     recognizer.process(image)
                         .addOnSuccessListener { visionText ->
-                            val capturedText = captureLines(visionText)   // try lines
-                            // val capturedText = captureBlocks(visionText) // try blocks
-                            //val capturedText = captureElements(visionText) // try words
-                            //val capturedText = captureWithBounds(visionText) // debug layout
+                            // Just grab the raw text
+                            val mergedText = extractVisualLines(visionText)
+
+                            val cleanedText = mergedText
+                                .split("\n")
+                                .map { it.trim() }
+                                .filter { it.isNotEmpty() }
+                                .filterNot { isReceiptNoise(it) }
+                                .joinToString("\n")
 
                             val intent = Intent().apply {
-                                putExtra("OCR_TEXT", capturedText)
+                                putExtra("OCR_TEXT", cleanedText)
                             }
+
                             setResult(RESULT_OK, intent)
                             finish()
                         }
@@ -88,41 +95,106 @@ class CameraActivity : AppCompatActivity() {
         )
     }
 
-    // Capture by lines
-    // Capture by lines, sorted top-to-bottom (ignore left/right)
-    // Capture by lines, sorted top-to-bottom (ignore left/right), filter out phone numbers
-    // Capture by lines, sorted top-to-bottom, filter out phone numbers and single letters
-    // Capture by lines, sorted top-to-bottom, filter out phone numbers, single letters, and unwanted keywords
-    fun captureLines(visionText: com.google.mlkit.vision.text.Text): String {
-        val lines = visionText.textBlocks.flatMap { it.lines }
-
-        // Sort by vertical position (top of bounding box)
-        val sortedLines = lines.sortedBy { it.boundingBox?.top ?: 0 }
-
-        // Regex for phone numbers
-        val phoneRegex = Regex("""(\+?\d[\d\s\-\(\)]{6,15}\d)""")
-
-        // Keywords to filter out (lowercase for matching)
-        val unwantedKeywords = listOf(
-            "subtotal", "total", "tax", "+ tax",
-            "debit card", "credit card", "change", "items"
+    private fun extractVisualLines(visionText: com.google.mlkit.vision.text.Text): String {
+        data class LineBox(
+            val text: String,
+            val top: Int,
+            val bottom: Int
         )
 
-        // Filter out lines
-        val filteredLines = sortedLines.filter { line ->
-            val text = line.text.trim()
-            val lower = text.lowercase()
+        val lines = mutableListOf<LineBox>()
 
-            val isPhone = phoneRegex.containsMatchIn(text)
-            val isSingleLetter = text.length == 1 && text[0].isLetter()
-            val hasUnwantedKeyword = unwantedKeywords.any { lower.contains(it) }
-
-            !(isPhone || isSingleLetter || hasUnwantedKeyword)
+        for (block in visionText.textBlocks) {
+            for (line in block.lines) {
+                val box = line.boundingBox ?: continue
+                lines.add(
+                    LineBox(
+                        text = line.text,
+                        top = box.top,
+                        bottom = box.bottom
+                    )
+                )
+            }
         }
 
-        return filteredLines.joinToString("\n") { line ->
-            line.text
+        // Sort top-to-bottom
+        lines.sortBy { it.top }
+
+        val mergedLines = mutableListOf<String>()
+        var currentGroup = mutableListOf<LineBox>()
+
+        fun flushGroup() {
+            if (currentGroup.isNotEmpty()) {
+                mergedLines.add(
+                    currentGroup
+                        .joinToString(" ") { it.text }
+                        .replace(Regex("""\s{2,}"""), " ")
+                        .trim()
+                )
+                currentGroup.clear()
+            }
         }
+
+        for (line in lines) {
+            if (currentGroup.isEmpty()) {
+                currentGroup.add(line)
+                continue
+            }
+
+            val last = currentGroup.last()
+
+            // If lines overlap vertically → same row
+            val overlap =
+                minOf(last.bottom, line.bottom) -
+                        maxOf(last.top, line.top)
+
+            if (overlap > 0) {
+                currentGroup.add(line)
+            } else {
+                flushGroup()
+                currentGroup.add(line)
+            }
+        }
+
+        flushGroup()
+
+        return mergedLines.joinToString("\n")
     }
+    private fun isReceiptNoise(line: String): Boolean {
+        val text = line.uppercase().trim()
+
+        // 1️⃣ Empty or too short
+        if (text.length < 3) return true
+
+        // 2️⃣ Phone numbers (926-4811, Tel# 926-4811)
+        if (Regex("""\b(TEL|TEL#|PHONE)?\s*\d{3}[-\s]?\d{4}\b""").containsMatchIn(text))
+            return true
+
+        // 3️⃣ Card / payment lines
+        val paymentKeywords = listOf(
+            "CARD", "DEBIT", "CREDIT", "VISA", "MASTERCARD",
+            "NCB", "SCOTIA", "BANK"
+        )
+        if (paymentKeywords.any { text.contains(it) }) return true
+
+        // 4️⃣ Totals / tax
+        val totalsKeywords = listOf(
+            "TOTAL", "SUBTOTAL", "TAX", "SALES", "BALANCE"
+        )
+        if (totalsKeywords.any { text.contains(it) }) return true
+
+        // 5️⃣ Metadata
+        val metaKeywords = listOf(
+            "RECEIPT", "INV#", "TRS#", "ITEM COUNT",
+            "DATE", "TIME", "CASHIER"
+        )
+        if (metaKeywords.any { text.contains(it) }) return true
+
+        // 6️⃣ Numeric-only or currency-only lines
+        if (Regex("""^\$?\d+(\.\d{2})?$""").matches(text)) return true
+
+        return false
+    }
+
 
 }

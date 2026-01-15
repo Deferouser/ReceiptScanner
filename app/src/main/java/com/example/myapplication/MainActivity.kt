@@ -130,29 +130,35 @@ class MainActivity : AppCompatActivity() {
     private fun parseArdenneReceipt(rawText: String): ReceiptSummary {
         val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
         val items = mutableListOf<ReceiptItem>()
-        val candidatePrices = mutableListOf<Double>()
-
-        var storeName: String? = null
         val addressLines = mutableListOf<String>()
 
-        val itemRegex = Regex("""^(\d+)\s+(.+)""")
-        val priceRegex = Regex("""^\$?\d{1,3}(,\d{3})*(\.\d{1,2})?\s*[A-Z]?$""")
-        val weightRegex = Regex("""([\d.]+)\s*kg\s*@\s*([\d.,]+)\/kg""")
-        val skipKeywords = listOf("TOTAL","SUBTOTAL","BALANCE","SALES","TAX","USER","DATE","RECEIPT")
-
+        var storeName: String? = null
         var capturingAddress = false
 
+        val skipKeywords = listOf(
+            "TOTAL","SUBTOTAL","BALANCE","SALES","TAX","USER","DATE","RECEIPT",
+            "CHANGE", "THANK YOU", "RETURN", "REFUND"
+        )
+
+        // Regex to match lines like "1 Pepsi 591ml 169.65"
+        val itemLineRegex = Regex("""^(\d+)\s+(.+?)\s+(\d+(?:\.\d{1,2})?)$""")
+
         for (line in lines) {
-            // Capture store name (first line before keywords)
-            if (storeName == null && skipKeywords.none { line.uppercase().contains(it) }) {
+            val upper = line.uppercase()
+
+            // Skip junk lines
+            if (skipKeywords.any { upper.contains(it) }) continue
+
+            // Capture store name (first line before junk)
+            if (storeName == null) {
                 storeName = line
                 capturingAddress = true
                 continue
             }
 
-            // Capture address lines until keywords or items
+            // Capture address lines until first item
             if (capturingAddress) {
-                if (skipKeywords.any { line.uppercase().contains(it) } || itemRegex.find(line) != null) {
+                if (itemLineRegex.matches(line)) {
                     capturingAddress = false
                 } else {
                     addressLines.add(line)
@@ -160,104 +166,86 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // Weighted item
-            val weightMatch = weightRegex.find(line)
-            if (weightMatch != null) {
-                items.add(ReceiptItem(qty = 1, description = "Weighted Item"))
-                continue
-            }
-
-            // Item line
-            val itemMatch = itemRegex.find(line)
-            if (itemMatch != null) {
-                val number = itemMatch.groupValues[1].toInt()
-                val desc = itemMatch.groupValues[2]
-                if (number < 1000) {
-                    items.add(ReceiptItem(qty = number, description = desc))
-                } else {
-                    items.add(ReceiptItem(qty = 1, description = desc))
-                }
-                continue
-            }
-
-            // Price line
-            val priceMatch = priceRegex.find(line)
-            if (priceMatch != null && skipKeywords.none { line.uppercase().contains(it) }) {
-                val clean = line.replace("[^\\d.,]".toRegex(), "").replace(",", "")
-                if (clean.isNotEmpty()) {
-                    candidatePrices.add(clean.toDouble())
-                }
+            // Match actual item lines
+            val match = itemLineRegex.find(line)
+            if (match != null) {
+                val qty = match.groupValues[1].toInt()
+                val description = match.groupValues[2].trim()
+                val price = match.groupValues[3].toDoubleOrNull() ?: 0.0
+                items.add(ReceiptItem(qty, description, price))
             }
         }
 
-        // Map prices to items sequentially
-        var priceIndex = 0
-        for (i in items.indices) {
-            if (items[i].price == null && priceIndex < candidatePrices.size) {
-                items[i] = items[i].copy(price = candidatePrices[priceIndex])
-                priceIndex++
-            }
-        }
+        // Validate store name
+        val validKeywords = listOf("PHARMACY","STORE","SUPER","MART","GIFT","CENTRE")
+        val storeNameMissing = storeName == null || validKeywords.none { storeName!!.uppercase().contains(it) }
 
-        // Fallback: try to guess store name later
-        if (storeName == null || storeName.contains(Regex("""\d""")) ||
-            storeName.contains("ROAD", true) || storeName.contains("SHOP", true)) {
-            val candidate = lines.firstOrNull {
-                it.uppercase().contains("PHARMACY") ||
-                        it.uppercase().contains("SUPERMARKET") ||
-                        it.uppercase().contains("STORE") ||
-                        it.uppercase().contains("CENTRE") ||
-                        it.uppercase().contains("MART") ||
-                        it.uppercase().contains("MARKET")
-            }
-            if (candidate != null) {
-                storeName = candidate
-            }
-        }
-
-        // ✅ Validation: mark missing if store name doesn’t contain expected keywords
-        val validKeywords = listOf("MARKET", "SUPER", "STORE", "PHARMACY", "CENTRE", "SHOP", "MART", "GROCERY")
-        val storeNameMissing = storeName == null ||
-                validKeywords.none { keyword -> storeName!!.uppercase().contains(keyword) }
-
-        return ReceiptSummary(storeName, addressLines.joinToString(", "), items, storeNameMissing)
+        return ReceiptSummary(
+            storeName = storeName,
+            address = addressLines.joinToString(", "),
+            items = items,
+            storeNameMissing = storeNameMissing
+        )
     }
+
 
     private fun parseLoshusanReceipt(rawText: String): ReceiptSummary {
-        val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        val lines = rawText
+            .split("\n")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
         val items = mutableListOf<ReceiptItem>()
-        val storeName: String? = "Loshusan Supermarket"
-        val location: String? = "New Kingston"
+        val storeName = "Loshusan Supermarket"
+        val location = "New Kingston"
 
-        val priceRegex = Regex("""\$?\d{2,6}(\.\d{1,2})?""")
         val skipKeywords = listOf(
-            "TOTAL","SUBTOTAL","BALANCE","SALES","TAX","USER","DATE","RECEIPT",
-            "ITEM COUNT","CARD","GCT","SUBTOTAL","STANDARD","NCB","PRODUCE","GENERAL",
-            "WORKING DAYS","DONATE","BREAST CANCER","THANK YOU"
+            "TOTAL", "SUBTOTAL", "SALES", "CARD", "NCB",
+            "ITEM COUNT", "RECEIPT", "THANK YOU",
+            "NO EXCHANGE", "DONATE", "BREAST CANCER",
+            "INV#", "TRS#", "TEL#", "DATE", "TIME"
         )
 
-        for (i in lines.indices) {
-            val line = lines[i]
+        val categoryKeywords = listOf(
+            "PRODUCE", "BAKED GOODS", "GROCERY", "MEAT", "DAIRY"
+        )
 
-            val isPriceLine = priceRegex.matches(line.replace(" ", ""))
-            val isSkip = skipKeywords.any { line.uppercase().contains(it) }
-            val isShortNumber = line.matches(Regex("""^\d+$"""))
+        // Regex to match: description + optional $ + price + optional TGCT
+        val itemLineRegex = Regex("""^(.+?)\s+\$?(\d+(?:\.\d{1,2}))\s*(?:TG[A-Z]+)?$""")
 
-            if (!isPriceLine && !isSkip && !isShortNumber) {
-                val priceLine = lines.take(i).lastOrNull { priceRegex.containsMatchIn(it) }
-                val price = priceLine?.let {
-                    priceRegex.find(it)?.value?.replace("$", "")?.toDoubleOrNull()
-                }
+        for (line in lines) {
+            val upper = line.uppercase()
 
-                if (price != null) {
-                    items.add(ReceiptItem(qty = 1, description = line, price = price))
+            // Skip metadata / junk
+            if (skipKeywords.any { upper.contains(it) }) continue
+            if (upper == storeName.uppercase()) continue
+            if (categoryKeywords.any { upper == it }) continue
+
+            // Match line containing item + price
+            val match = itemLineRegex.find(line) ?: continue
+
+            var description = match.groupValues[1].trim()
+            val price = match.groupValues[2].toDouble()
+
+            // Remove leading category if present
+            for (category in categoryKeywords) {
+                if (description.uppercase().startsWith(category)) {
+                    description = description.substring(category.length).trim()
                 }
             }
+
+            // Safety check: must be at least two words
+            if (description.split(" ").size < 2) continue
+
+            items.add(ReceiptItem(1, description, price))
         }
 
-        return ReceiptSummary(storeName, location, items, storeName == null)
+        return ReceiptSummary(storeName, location, items, false)
     }
+
+
+
+
     private fun parseGenericReceipt(rawText: String): ReceiptSummary {
         val lines = rawText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
         val storeName = lines.firstOrNull()
@@ -298,6 +286,40 @@ class MainActivity : AppCompatActivity() {
             processReceiptImage(photoFile)
         }
     }
+
+    private fun isLikelyProductLine(line: String): Boolean {
+        val text = line.trim()
+        val upper = text.uppercase()
+
+        // Must contain a $ price
+        if (!Regex("""\$\s*\d+\.\d{2}""").containsMatchIn(text)) return false
+
+        // Must contain letters
+        if (!text.any { it.isLetter() }) return false
+
+        // Reject sentence-like lines
+        val rejectKeywords = listOf(
+            "TOTAL", "SUBTOTAL", "GCT", "SALES",
+            "CARD", "NCB", "SCOTIA",
+            "ITEM COUNT", "RECEIPT",
+            "DONATE", "THANK YOU",
+            "NO EXCHANGE", "CASH REFUND"
+        )
+        if (rejectKeywords.any { upper.contains(it) }) return false
+
+        // Reject categories or store name
+        val categoryKeywords = listOf(
+            "PRODUCE", "BAKED GOODS", "SUPERMARKET"
+        )
+        if (categoryKeywords.any { upper == it }) return false
+
+        // Product names usually have multiple words
+        if (text.split(" ").size < 2) return false
+
+
+        return true
+    }
+
 
     private val cameraLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
